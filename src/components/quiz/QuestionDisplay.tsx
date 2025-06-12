@@ -1,5 +1,6 @@
+
 import type React from 'react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
 import type { Question } from '@/types/quiz';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -26,19 +27,26 @@ export function QuestionDisplay({
 }: QuestionDisplayProps) {
   const [selectedAnswers, setSelectedAnswers] = useState<number[]>([]);
   const [timeLeft, setTimeLeft] = useState<number>(timeLimit);
-  const [startTime, setStartTime] = useState<number>(0);
+  
+  const startTimeRef = useRef<number>(0);
+  const selectedAnswersRef = useRef<number[]>(selectedAnswers);
+
+  useEffect(() => {
+    selectedAnswersRef.current = selectedAnswers;
+  }, [selectedAnswers]);
 
   useEffect(() => {
     setTimeLeft(timeLimit);
-    setSelectedAnswers([]);
-    setStartTime(Date.now());
+    setSelectedAnswers([]); 
+    selectedAnswersRef.current = []; 
+    startTimeRef.current = Date.now(); 
+
     const timer = setInterval(() => {
       setTimeLeft((prevTime) => {
         if (prevTime <= 1) {
           clearInterval(timer);
-          // Automatically proceed to next question
-          const timeTaken = Math.round((Date.now() - startTime) / 1000);
-          onNext(selectedAnswers, Math.min(timeTaken, timeLimit)); 
+          const timeTaken = Math.round((Date.now() - startTimeRef.current) / 1000);
+          onNext(selectedAnswersRef.current, Math.min(timeTaken, timeLimit)); 
           return 0;
         }
         return prevTime - 1;
@@ -46,7 +54,7 @@ export function QuestionDisplay({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [question, timeLimit, onNext, startTime]);
+  }, [question, timeLimit, onNext]);
 
 
   const handleSingleSelect = (value: string) => {
@@ -60,9 +68,9 @@ export function QuestionDisplay({
   };
 
   const handleSubmit = useCallback(() => {
-    const timeTaken = Math.round((Date.now() - startTime) / 1000);
+    const timeTaken = Math.round((Date.now() - startTimeRef.current) / 1000);
     onNext(selectedAnswers, Math.min(timeTaken, timeLimit));
-  }, [onNext, selectedAnswers, startTime, timeLimit]);
+  }, [onNext, selectedAnswers, timeLimit]);
 
 
   const progressPercentage = (timeLeft / timeLimit) * 100;
