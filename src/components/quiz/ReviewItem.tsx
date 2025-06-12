@@ -1,3 +1,4 @@
+
 import type React from 'react';
 import type { UserAnswer } from '@/types/quiz';
 import { Button } from '@/components/ui/button';
@@ -6,7 +7,7 @@ import { CheckCircle, XCircle, AlertTriangle, Trash2 } from 'lucide-react';
 
 interface ReviewItemProps {
   userAnswer: UserAnswer;
-  onDoneReviewing: (questionId: string) => void;
+  onDoneReviewing: () => void; // Changed from (questionId: string) => void
 }
 
 export function ReviewItem({ userAnswer, onDoneReviewing }: ReviewItemProps) {
@@ -57,11 +58,11 @@ export function ReviewItem({ userAnswer, onDoneReviewing }: ReviewItemProps) {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => onDoneReviewing(userAnswer.questionId)}
+          onClick={onDoneReviewing} // Changed from onClick={() => onDoneReviewing(userAnswer.questionId)}
           className="ml-auto border-primary text-primary hover:bg-primary/10"
         >
           <Trash2 className="h-4 w-4 mr-2" />
-          Done Reviewing
+          Done Reviewing this Question
         </Button>
       </CardFooter>
     </Card>
