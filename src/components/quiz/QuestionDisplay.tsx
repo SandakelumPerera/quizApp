@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Question } from '@/types/quiz';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-// RadioGroup and RadioGroupItem are no longer needed
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -18,6 +17,21 @@ interface QuestionDisplayProps {
   onNext: (selectedAnswers: number[], timeTaken: number) => void;
 }
 
+interface ShuffledOption {
+  text: string;
+  originalIndex: number;
+}
+
+// Fisher-Yates shuffle algorithm
+function shuffleArray<T>(array: T[]): T[] {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+}
+
 export function QuestionDisplay({
   question,
   questionNumber,
@@ -25,21 +39,29 @@ export function QuestionDisplay({
   timeLimit,
   onNext,
 }: QuestionDisplayProps) {
-  const [selectedAnswers, setSelectedAnswers] = useState<number[]>([]);
+  const [shuffledOptionsData, setShuffledOptionsData] = useState<ShuffledOption[]>([]);
+  const [selectedShuffledIndices, setSelectedShuffledIndices] = useState<number[]>([]);
   const [timeLeft, setTimeLeft] = useState<number>(timeLimit);
   
   const startTimeRef = useRef<number>(0);
-  const selectedAnswersRef = useRef<number[]>(selectedAnswers); 
+  // Ref to hold the latest selectedShuffledIndices for the timer closure
+  const selectedShuffledIndicesRef = useRef<number[]>(selectedShuffledIndices);
 
   useEffect(() => {
-    selectedAnswersRef.current = selectedAnswers;
-  }, [selectedAnswers]);
-
+    selectedShuffledIndicesRef.current = selectedShuffledIndices;
+  }, [selectedShuffledIndices]);
 
   useEffect(() => {
+    // Create an array of objects with text and original index
+    const optionsWithOriginalIndices = question.options.map((optionText, index) => ({
+      text: optionText,
+      originalIndex: index,
+    }));
+    setShuffledOptionsData(shuffleArray(optionsWithOriginalIndices));
+    
+    setSelectedShuffledIndices([]); // Reset selections for new question
+    selectedShuffledIndicesRef.current = []; // Reset ref as well
     setTimeLeft(timeLimit); 
-    setSelectedAnswers([]); 
-    selectedAnswersRef.current = []; 
     startTimeRef.current = Date.now(); 
 
     if (timeLimit === 0) return; 
@@ -49,7 +71,21 @@ export function QuestionDisplay({
         if (prevTime <= 1) {
           clearInterval(timer);
           const timeTaken = Math.round((Date.now() - startTimeRef.current) / 1000);
-          onNext(selectedAnswersRef.current, Math.min(timeTaken, timeLimit)); 
+          // Convert selected shuffled indices back to original indices
+          const originalSelectedIndices = selectedShuffledIndicesRef.current.map(
+            (shuffledIdx) => {
+                // Find the item in the *current* shuffledOptionsData.
+                // This requires shuffledOptionsData to be stable *within* this timer's effect scope
+                // or for selectedShuffledIndicesRef to be updated along with shuffledOptionsData.
+                // For simplicity and because QuestionDisplay rerenders with new question, we assume
+                // current shuffledOptionsData (set at question load) is what we need.
+                const currentShuffledOptions = shuffleArray(question.options.map((opt, idx) => ({text: opt, originalIndex: idx})));
+                return currentShuffledOptions[shuffledIdx]?.originalIndex ?? -1; // Fallback for safety
+            }
+          ).filter(idx => idx !== -1);
+
+
+          onNext(originalSelectedIndices, Math.min(timeTaken, timeLimit)); 
           return 0;
         }
         return prevTime - 1;
@@ -57,26 +93,23 @@ export function QuestionDisplay({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [question, timeLimit, onNext]); 
+  }, [question, timeLimit, onNext]); // shuffledOptionsData removed from deps to avoid re-shuffling on every render if not careful
 
 
-  const handleOptionSelect = (selectedIndex: number) => {
+  const handleOptionSelect = (selectedIndexInShuffledArray: number) => {
     if (question.isMultipleChoice) {
-      setSelectedAnswers((prevSelected) => {
-        const newSelected = prevSelected.includes(selectedIndex)
-          ? prevSelected.filter((i) => i !== selectedIndex) // Toggle off
-          : [...prevSelected, selectedIndex]; // Toggle on
+      setSelectedShuffledIndices((prevSelected) => {
+        const newSelected = prevSelected.includes(selectedIndexInShuffledArray)
+          ? prevSelected.filter((i) => i !== selectedIndexInShuffledArray)
+          : [...prevSelected, selectedIndexInShuffledArray];
         return newSelected;
       });
     } else {
-      // Single choice logic with checkboxes:
-      // If it's already selected, clicking again deselects it.
-      // If a different one is selected, it becomes the only selected one.
-      setSelectedAnswers((prevSelected) => {
-        if (prevSelected.includes(selectedIndex)) {
-          return []; // Allow unchecking
+      setSelectedShuffledIndices((prevSelected) => {
+        if (prevSelected.includes(selectedIndexInShuffledArray)) {
+          return []; 
         } else {
-          return [selectedIndex]; // Select only this one
+          return [selectedIndexInShuffledArray]; 
         }
       });
     }
@@ -84,8 +117,14 @@ export function QuestionDisplay({
 
   const handleSubmit = useCallback(() => {
     const timeTaken = timeLimit === 0 ? 0 : Math.round((Date.now() - startTimeRef.current) / 1000);
-    onNext(selectedAnswers, timeLimit === 0 ? 0 : Math.min(timeTaken, timeLimit));
-  }, [onNext, selectedAnswers, timeLimit]);
+    
+    // Convert selected shuffled indices back to original indices
+    const originalSelectedIndices = selectedShuffledIndices.map(
+      (shuffledIdx) => shuffledOptionsData[shuffledIdx].originalIndex
+    );
+    
+    onNext(originalSelectedIndices, timeLimit === 0 ? 0 : Math.min(timeTaken, timeLimit));
+  }, [onNext, selectedShuffledIndices, timeLimit, shuffledOptionsData]);
 
 
   const progressPercentage = timeLimit > 0 ? (timeLeft / timeLimit) * 100 : 100;
@@ -109,16 +148,16 @@ export function QuestionDisplay({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-3">
-          {question.options.map((option, index) => (
-            <div key={index} className="flex items-center space-x-3 p-3 border rounded-md hover:bg-muted/50 transition-colors">
+          {shuffledOptionsData.map((optionData, shuffledIndex) => (
+            <div key={`${question.id}-option-${optionData.originalIndex}`} className="flex items-center space-x-3 p-3 border rounded-md hover:bg-muted/50 transition-colors">
               <Checkbox
-                id={`option-${index}`}
-                checked={selectedAnswers.includes(index)}
-                onCheckedChange={() => handleOptionSelect(index)}
-                aria-label={option}
+                id={`option-${question.id}-${shuffledIndex}`}
+                checked={selectedShuffledIndices.includes(shuffledIndex)}
+                onCheckedChange={() => handleOptionSelect(shuffledIndex)}
+                aria-label={optionData.text}
               />
-              <Label htmlFor={`option-${index}`} className="text-base cursor-pointer flex-1">
-                {option}
+              <Label htmlFor={`option-${question.id}-${shuffledIndex}`} className="text-base cursor-pointer flex-1">
+                {optionData.text}
               </Label>
             </div>
           ))}
