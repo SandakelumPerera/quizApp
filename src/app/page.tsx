@@ -8,7 +8,8 @@ import { QuestionDisplay } from '@/components/quiz/QuestionDisplay';
 import { QuizResults } from '@/components/quiz/QuizResults';
 import { StudyModeDisplay } from '@/components/quiz/StudyModeDisplay';
 import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from 'lucide-react';
+import { Loader2, BrainCircuit } from 'lucide-react'; // Added BrainCircuit
+import { generateQuiz, type GenerateQuizInput } from '@/ai/flows/generate-quiz-flow';
 
 const SUGGESTED_JSON_FORMAT = `{
   "title": "My Awesome Quiz",
@@ -40,25 +41,45 @@ export default function HomePage() {
   const [quizData, setQuizData] = useState<QuizData | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [userAnswers, setUserAnswers] = useState<UserAnswer[]>([]);
-  const [timePerQuestion, setTimePerQuestion] = useState<number>(60);
+  const [timePerQuestion, setTimePerQuestion] = useState<number>(60); // Default for manually uploaded quizzes
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
   const { toast } = useToast();
 
-  const handleQuizStart = useCallback((data: QuizData, time: number, mode: QuizMode) => {
-    setIsLoading(true);
+  const handleQuizLoad = useCallback((data: QuizData, mode: QuizMode, timeLimitPerQuestion?: number) => {
     setQuizData(data);
     setQuizMode(mode);
     if (mode === 'exam') {
-      setTimePerQuestion(time);
+      setTimePerQuestion(timeLimitPerQuestion || 0); // 0 for generated quizzes means no timer per q, or use configured time
       setCurrentQuestionIndex(0);
       setUserAnswers([]);
     }
     setQuizResult(null);
     setQuizState('active');
-    toast({ title: mode === 'exam' ? "Quiz Started!" : "Study Mode Activated!", description: data.title || (mode === 'exam' ? "Good luck!" : "Happy studying!") });
-    setIsLoading(false);
+    toast({ title: mode === 'exam' ? "Quiz Ready!" : "Study Mode Activated!", description: data.title || (mode === 'exam' ? "Good luck!" : "Happy studying!") });
   }, [toast]);
+
+
+  const handleGenerateQuizAndStart = useCallback(async (generationInput: GenerateQuizInput, mode: QuizMode) => {
+    setQuizState('generating');
+    try {
+      const generatedData = await generateQuiz(generationInput);
+      if (!generatedData || !generatedData.questions || generatedData.questions.length === 0) {
+        toast({ variant: "destructive", title: "Generation Failed", description: "The AI could not generate a quiz from the provided material." });
+        setQuizState('upload');
+        return;
+      }
+      // For generated quizzes, we might not want a strict time limit per question initially, or make it configurable.
+      // Setting to 0 implies no individual question timer for now in QuestionDisplay logic (if adapted) or rely on total time.
+      // Or, we can assign a default time like 60s.
+      handleQuizLoad(generatedData, mode, mode === 'exam' ? 60 : undefined); 
+    } catch (error) {
+      console.error("Quiz generation error:", error);
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred during quiz generation.";
+      toast({ variant: "destructive", title: "Generation Error", description: errorMessage });
+      setQuizState('upload');
+    }
+  }, [handleQuizLoad, toast]);
+
 
   const calculateScore = useCallback((finalAnswers: UserAnswer[], questions: Question[]): QuizResult => {
     let score = 0;
@@ -115,7 +136,6 @@ export default function HomePage() {
     if (currentQuestionIndex < quizData.questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
     } else {
-      // End of quiz
       const finalResult = calculateScore(updatedAnswers, quizData.questions);
       setQuizResult(finalResult);
       setQuizState('results');
@@ -130,7 +150,6 @@ export default function HomePage() {
     setCurrentQuestionIndex(0);
     setUserAnswers([]);
     setQuizResult(null);
-    setIsLoading(false);
   }, []);
 
   const currentQuestionData = useMemo(() => {
@@ -140,11 +159,13 @@ export default function HomePage() {
     return null;
   }, [quizData, quizState, quizMode, currentQuestionIndex]);
 
-  if (isLoading) {
+  if (quizState === 'generating') {
     return (
       <main className="flex-grow flex flex-col items-center justify-center p-4 md:p-8 bg-background">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="mt-4 text-lg text-foreground">Loading...</p>
+        <BrainCircuit className="h-16 w-16 animate-pulse text-primary mb-4" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="mt-4 text-xl text-foreground">Generating your quiz...</p>
+        <p className="text-sm text-muted-foreground">This may take a moment.</p>
       </main>
     );
   }
@@ -153,7 +174,11 @@ export default function HomePage() {
     <main className="flex-grow flex flex-col items-center justify-center p-4 md:p-8 bg-background">
       <div className="container mx-auto">
         {quizState === 'upload' && (
-          <QuizUpload onQuizStart={handleQuizStart} suggestedFormat={SUGGESTED_JSON_FORMAT} />
+          <QuizUpload 
+            onQuizLoad={handleQuizLoad} 
+            onGenerateQuiz={handleGenerateQuizAndStart}
+            suggestedFormat={SUGGESTED_JSON_FORMAT} 
+          />
         )}
         {quizState === 'active' && quizMode === 'exam' && currentQuestionData && quizData && (
           <QuestionDisplay
@@ -161,7 +186,7 @@ export default function HomePage() {
             question={currentQuestionData}
             questionNumber={currentQuestionIndex + 1}
             totalQuestions={quizData.questions.length}
-            timeLimit={timePerQuestion}
+            timeLimit={timePerQuestion} // This will be 0 for generated quizzes if not set otherwise
             onNext={handleNextQuestion}
           />
         )}

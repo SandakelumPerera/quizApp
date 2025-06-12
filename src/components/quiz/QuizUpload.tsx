@@ -1,30 +1,46 @@
 
 import type React from 'react';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { UploadCloud, Info, BookOpen, Edit3 } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { UploadCloud, Info, BookOpen, Edit3, Sparkles, FileText, Image as ImageIcon, ListPlus } from 'lucide-react';
 import type { QuizData } from '@/types/quiz';
+import type { GenerateQuizInput } from '@/ai/flows/generate-quiz-flow';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Separator } from "@/components/ui/separator";
+import { useToast } from "@/hooks/use-toast";
 
 type QuizMode = 'exam' | 'study';
+type UploadMode = 'file' | 'generate';
 
 interface QuizUploadProps {
-  onQuizStart: (quizData: QuizData, timePerQuestion: number, mode: QuizMode) => void;
+  onQuizLoad: (quizData: QuizData, timePerQuestion: number, mode: QuizMode) => void;
+  onGenerateQuiz: (generationInput: GenerateQuizInput, mode: QuizMode) => Promise<void>;
   suggestedFormat: string;
 }
 
-const timerOptions = Array.from({ length: 13 }, (_, i) => 60 + i * 5); // 1:00 to 2:00 in 5s intervals
+const timerOptions = Array.from({ length: 12 }, (_, i) => 60 + i * 5); // 1:00 to 1:55 in 5s intervals
+timerOptions.unshift(30); // Add 30 seconds option
+timerOptions.sort((a, b) => a - b);
 
-export function QuizUpload({ onQuizStart, suggestedFormat }: QuizUploadProps) {
+const numQuestionsOptions = Array.from({ length: 10 }, (_, i) => (i + 1) * 1).concat([15, 20]); // 1-10, 15, 20
+
+export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: QuizUploadProps) {
   const [file, setFile] = useState<File | null>(null);
-  const [timePerQuestion, setTimePerQuestion] = useState<number>(timerOptions[0]);
+  const [timePerQuestion, setTimePerQuestion] = useState<number>(timerOptions[2]); // Default to 60s
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<QuizMode>('exam');
+  const [quizMode, setQuizMode] = useState<QuizMode>('exam');
+  const [uploadMode, setUploadMode] = useState<UploadMode>('file');
+
+  const [materialText, setMaterialText] = useState<string>("");
+  const [materialImages, setMaterialImages] = useState<File[]>([]);
+  const [numGeneratedQuestions, setNumGeneratedQuestions] = useState<number>(5);
+  const { toast } = useToast();
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
@@ -33,11 +49,25 @@ export function QuizUpload({ onQuizStart, suggestedFormat }: QuizUploadProps) {
     }
   };
 
-  const handleSubmit = async () => {
+  const handleImageFilesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) {
+      const filesArray = Array.from(event.target.files);
+      if (filesArray.length > 5) { // Limit to 5 images for now
+        toast({variant: 'destructive', title: 'Too many images', description: 'Please select up to 5 images.'});
+        setMaterialImages(filesArray.slice(0,5));
+        event.target.value = ''; // Clear the input
+      } else {
+        setMaterialImages(filesArray);
+      }
+    }
+  };
+
+  const handleSubmitFile = async () => {
     if (!file) {
       setError('Please upload a JSON file.');
       return;
     }
+    setError(null);
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -47,20 +77,26 @@ export function QuizUpload({ onQuizStart, suggestedFormat }: QuizUploadProps) {
           throw new Error('Failed to read file content.');
         }
         const jsonData = JSON.parse(text) as QuizData;
+        if (!jsonData.title || typeof jsonData.title !== 'string') {
+          throw new Error('Invalid quiz format: "title" is missing or not a string.');
+        }
         if (!jsonData.questions || !Array.isArray(jsonData.questions) || jsonData.questions.length === 0) {
           throw new Error('Invalid quiz format: "questions" array is missing, not an array, or empty.');
         }
         jsonData.questions.forEach((q, index) => {
           if (!q.id || typeof q.id !== 'string' ||
               !q.questionText || typeof q.questionText !== 'string' ||
-              !q.options || !Array.isArray(q.options) || q.options.some(opt => typeof opt !== 'string') ||
-              !q.correctAnswers || !Array.isArray(q.correctAnswers) || q.correctAnswers.some(ans => typeof ans !== 'number') ||
+              !q.options || !Array.isArray(q.options) || q.options.length < 2 || q.options.some(opt => typeof opt !== 'string') ||
+              !q.correctAnswers || !Array.isArray(q.correctAnswers) || q.correctAnswers.length === 0 || q.correctAnswers.some(ans => typeof ans !== 'number' || ans < 0 || ans >= q.options.length) ||
               typeof q.isMultipleChoice !== 'boolean'
           ) {
-            throw new Error(`Invalid format for question at index ${index}.`);
+            throw new Error(`Invalid format for question at index ${index}. Check ID, text, options (min 2), correctAnswers (valid indices), and isMultipleChoice.`);
+          }
+          if (q.isMultipleChoice === false && q.correctAnswers.length > 1) {
+            throw new Error(`Question at index ${index} is single choice but has multiple correct answers.`);
           }
         });
-        onQuizStart(jsonData, timePerQuestion, mode);
+        onQuizLoad(jsonData, timePerQuestion, quizMode);
       } catch (err) {
         console.error("Error parsing JSON or validating quiz data:", err);
         setError(err instanceof Error ? err.message : 'Invalid JSON file or format.');
@@ -72,84 +108,196 @@ export function QuizUpload({ onQuizStart, suggestedFormat }: QuizUploadProps) {
     reader.readAsText(file);
   };
 
+  const handleGenerateAndStart = async () => {
+    setError(null);
+    if (!materialText && materialImages.length === 0) {
+      setError("Please provide some study material (text or images).");
+      return;
+    }
+    if (numGeneratedQuestions <= 0) {
+      setError("Number of questions must be positive.");
+      return;
+    }
+
+    const imagePromises = materialImages.map(imgFile => {
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            resolve(reader.result);
+          } else {
+            reject(new Error('Failed to read image as data URL.'));
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(imgFile);
+      });
+    });
+
+    try {
+      const imageDataUris = await Promise.all(imagePromises);
+      const generationInput: GenerateQuizInput = {
+        materialText: materialText || undefined,
+        materialImages: imageDataUris.length > 0 ? imageDataUris : undefined,
+        numberOfQuestions: numGeneratedQuestions,
+      };
+      await onGenerateQuiz(generationInput, quizMode);
+    } catch (readError) {
+       console.error("Error reading images:", readError);
+       setError(readError instanceof Error ? readError.message : "Error processing images.");
+    }
+  };
+  
+  const selectedTimerOption = timerOptions.find(t => t === timePerQuestion) || timerOptions[0];
+
+
   return (
     <Card className="w-full max-w-lg mx-auto shadow-xl">
       <CardHeader>
         <CardTitle className="text-3xl text-center font-headline">QuizJSON</CardTitle>
         <CardDescription className="text-center">
-          Upload your quiz in JSON format and choose your mode.
+          {uploadMode === 'file' ? 'Upload your quiz in JSON format.' : 'Generate a quiz from study material.'}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="space-y-2">
-          <Label htmlFor="quiz-file" className="flex items-center">
-            Quiz JSON File
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Info className="ml-2 h-4 w-4 cursor-help text-muted-foreground" />
-                </TooltipTrigger>
-                <TooltipContent side="right" className="max-w-xs text-sm p-2 bg-popover text-popover-foreground shadow-md rounded-md">
-                  <p className="font-medium mb-1">Suggested JSON Format:</p>
-                  <pre className="text-xs bg-muted p-2 rounded-sm overflow-x-auto whitespace-pre-wrap">{suggestedFormat}</pre>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </Label>
-          <div className="flex items-center space-x-2">
-            <UploadCloud className="h-5 w-5 text-muted-foreground" />
-            <Input id="quiz-file" type="file" accept=".json" onChange={handleFileChange} className="file:text-primary file:font-medium"/>
-          </div>
+
+        <div className="flex justify-center space-x-2">
+            <Button variant={uploadMode === 'file' ? 'default': 'outline'} onClick={() => setUploadMode('file')} className="flex-1">
+                <UploadCloud className="mr-2 h-4 w-4" /> Upload JSON
+            </Button>
+            <Button variant={uploadMode === 'generate' ? 'default': 'outline'} onClick={() => setUploadMode('generate')} className="flex-1">
+                <Sparkles className="mr-2 h-4 w-4" /> Generate Quiz
+            </Button>
         </div>
+        <Separator />
+
+        {uploadMode === 'file' && (
+          <div className="space-y-4 animate-fade-in">
+            <div className="space-y-2">
+              <Label htmlFor="quiz-file" className="flex items-center">
+                Quiz JSON File
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="ml-2 h-4 w-4 cursor-help text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-xs text-sm p-2 bg-popover text-popover-foreground shadow-md rounded-md border">
+                      <p className="font-medium mb-1">Suggested JSON Format:</p>
+                      <pre className="text-xs bg-muted p-2 rounded-sm overflow-x-auto whitespace-pre-wrap">{suggestedFormat}</pre>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </Label>
+              <div className="flex items-center space-x-2">
+                <FileText className="h-5 w-5 text-muted-foreground" />
+                <Input id="quiz-file" type="file" accept=".json" onChange={handleFileChange} className="file:text-primary file:font-medium"/>
+              </div>
+            </div>
+             <div className="space-y-2">
+                <Label htmlFor="time-limit-file">Time per Question (Exam Mode)</Label>
+                <Select value={String(selectedTimerOption)} onValueChange={(value) => setTimePerQuestion(Number(value))} disabled={quizMode === 'study'}>
+                  <SelectTrigger id="time-limit-file" disabled={quizMode === 'study'}>
+                    <SelectValue placeholder="Select time limit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {timerOptions.map((time) => (
+                      <SelectItem key={time} value={String(time)}>
+                        {time === 0 ? 'No time limit' : `${Math.floor(time / 60)}:${String(time % 60).padStart(2, '0')} minutes`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+          </div>
+        )}
+
+        {uploadMode === 'generate' && (
+          <div className="space-y-4 animate-fade-in">
+            <div className="space-y-2">
+              <Label htmlFor="material-text">Study Text (Optional)</Label>
+               <Textarea 
+                id="material-text" 
+                placeholder="Paste your study text here. For PDFs, please copy and paste the content."
+                value={materialText}
+                onChange={(e) => setMaterialText(e.target.value)}
+                rows={6}
+                className="bg-background border-input focus:ring-ring"
+              />
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="material-images">Study Images (Optional, max 5)</Label>
+                <div className="flex items-center space-x-2">
+                    <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                    <Input 
+                        id="material-images" 
+                        type="file" 
+                        accept="image/*" 
+                        multiple 
+                        onChange={handleImageFilesChange} 
+                        className="file:text-primary file:font-medium"
+                    />
+                </div>
+                {materialImages.length > 0 && (
+                    <div className="text-xs text-muted-foreground pt-1">Selected {materialImages.length} image(s).</div>
+                )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="num-questions">Number of Questions to Generate</Label>
+               <Select value={String(numGeneratedQuestions)} onValueChange={(value) => setNumGeneratedQuestions(Number(value))}>
+                <SelectTrigger id="num-questions">
+                  <SelectValue placeholder="Select number of questions" />
+                </SelectTrigger>
+                <SelectContent>
+                  {numQuestionsOptions.map((num) => (
+                    <SelectItem key={num} value={String(num)}>
+                      {num} Questions
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-3">
           <Label>Mode Selection</Label>
           <div className="flex items-center justify-between p-3 border rounded-md">
             <div className='flex items-center'>
-              <Edit3 className={`mr-2 h-5 w-5 ${mode === 'exam' ? 'text-primary' : 'text-muted-foreground'}`} />
-              <Label htmlFor="mode-switch" className={`${mode === 'exam' ? 'text-primary font-semibold' : 'text-muted-foreground'}`}>
+              <Edit3 className={`mr-2 h-5 w-5 ${quizMode === 'exam' ? 'text-primary' : 'text-muted-foreground'}`} />
+              <Label htmlFor="mode-switch" className={`${quizMode === 'exam' ? 'text-primary font-semibold' : 'text-muted-foreground'}`}>
                 Exam Mode
               </Label>
             </div>
             <Switch
               id="mode-switch"
-              checked={mode === 'study'}
-              onCheckedChange={(checked) => setMode(checked ? 'study' : 'exam')}
+              checked={quizMode === 'study'}
+              onCheckedChange={(checked) => setQuizMode(checked ? 'study' : 'exam')}
               aria-label="Toggle between Exam and Study mode"
             />
             <div className='flex items-center'>
-              <Label htmlFor="mode-switch" className={`mr-2 ${mode === 'study' ? 'text-accent font-semibold' : 'text-muted-foreground'}`}>
+              <Label htmlFor="mode-switch" className={`mr-2 ${quizMode === 'study' ? 'text-accent font-semibold' : 'text-muted-foreground'}`}>
                 Study Mode
               </Label>
-              <BookOpen className={`h-5 w-5 ${mode === 'study' ? 'text-accent' : 'text-muted-foreground'}`} />
+              <BookOpen className={`h-5 w-5 ${quizMode === 'study' ? 'text-accent' : 'text-muted-foreground'}`} />
             </div>
           </div>
         </div>
+        
+        {error && <p className="text-sm text-destructive text-center py-2">{error}</p>}
 
-        {mode === 'exam' && (
-          <div className="space-y-2 animate-fade-in">
-            <Label htmlFor="time-limit">Time per Question (Exam Mode)</Label>
-            <Select value={String(timePerQuestion)} onValueChange={(value) => setTimePerQuestion(Number(value))}>
-              <SelectTrigger id="time-limit">
-                <SelectValue placeholder="Select time limit" />
-              </SelectTrigger>
-              <SelectContent>
-                {timerOptions.map((time) => (
-                  <SelectItem key={time} value={String(time)}>
-                    {Math.floor(time / 60)}:{String(time % 60).padStart(2, '0')} minutes
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
-        {error && <p className="text-sm text-destructive text-center">{error}</p>}
-
-        <Button onClick={handleSubmit} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" size="lg">
-          {mode === 'exam' ? 'Start Exam' : 'Start Studying'}
-        </Button>
       </CardContent>
+      <CardFooter>
+        {uploadMode === 'file' ? (
+            <Button onClick={handleSubmitFile} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" size="lg">
+            {quizMode === 'exam' ? 'Start Exam from File' : 'Start Studying from File'}
+            </Button>
+        ) : (
+            <Button onClick={handleGenerateAndStart} className="w-full bg-accent hover:bg-accent/90 text-accent-foreground" size="lg">
+                <ListPlus className="mr-2 h-5 w-5" />
+                {quizMode === 'exam' ? 'Generate & Start Exam' : 'Generate & Study'}
+            </Button>
+        )}
+      </CardFooter>
     </Card>
   );
 }

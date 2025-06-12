@@ -1,3 +1,4 @@
+
 export interface Question {
   id: string;
   questionText: string;
@@ -8,7 +9,7 @@ export interface Question {
 }
 
 export interface QuizData {
-  title?: string;
+  title: string; // Made title mandatory as AI will generate it
   questions: Question[];
 }
 
@@ -31,4 +32,4 @@ export interface QuizResult {
   totalTimeTaken: number;
 }
 
-export type QuizState = 'upload' | 'active' | 'results';
+export type QuizState = 'upload' | 'active' | 'results' | 'generating'; // Added 'generating' state
