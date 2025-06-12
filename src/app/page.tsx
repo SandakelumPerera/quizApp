@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
@@ -5,6 +6,7 @@ import type { QuizData, Question, UserAnswer, QuizResult, QuizState } from '@/ty
 import { QuizUpload } from '@/components/quiz/QuizUpload';
 import { QuestionDisplay } from '@/components/quiz/QuestionDisplay';
 import { QuizResults } from '@/components/quiz/QuizResults';
+import { StudyModeDisplay } from '@/components/quiz/StudyModeDisplay';
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
 
@@ -30,9 +32,11 @@ const SUGGESTED_JSON_FORMAT = `{
   ]
 }`;
 
+type QuizMode = 'exam' | 'study';
 
 export default function HomePage() {
   const [quizState, setQuizState] = useState<QuizState>('upload');
+  const [quizMode, setQuizMode] = useState<QuizMode>('exam');
   const [quizData, setQuizData] = useState<QuizData | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [userAnswers, setUserAnswers] = useState<UserAnswer[]>([]);
@@ -41,15 +45,18 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const { toast } = useToast();
 
-  const handleQuizStart = useCallback((data: QuizData, time: number) => {
+  const handleQuizStart = useCallback((data: QuizData, time: number, mode: QuizMode) => {
     setIsLoading(true);
     setQuizData(data);
-    setTimePerQuestion(time);
-    setCurrentQuestionIndex(0);
-    setUserAnswers([]);
+    setQuizMode(mode);
+    if (mode === 'exam') {
+      setTimePerQuestion(time);
+      setCurrentQuestionIndex(0);
+      setUserAnswers([]);
+    }
     setQuizResult(null);
     setQuizState('active');
-    toast({ title: "Quiz Started!", description: data.title || "Good luck!" });
+    toast({ title: mode === 'exam' ? "Quiz Started!" : "Study Mode Activated!", description: data.title || (mode === 'exam' ? "Good luck!" : "Happy studying!") });
     setIsLoading(false);
   }, [toast]);
 
@@ -73,7 +80,7 @@ export default function HomePage() {
   }, []);
 
   const handleNextQuestion = useCallback((selectedIndices: number[], timeTaken: number) => {
-    if (!quizData) return;
+    if (!quizData || quizMode !== 'exam') return;
 
     const currentQuestion = quizData.questions[currentQuestionIndex];
     let isCorrect = false;
@@ -114,10 +121,11 @@ export default function HomePage() {
       setQuizState('results');
       toast({ title: "Quiz Finished!", description: `You scored ${finalResult.score} out of ${finalResult.totalQuestions}.` });
     }
-  }, [quizData, currentQuestionIndex, userAnswers, calculateScore, toast]);
+  }, [quizData, quizMode, currentQuestionIndex, userAnswers, calculateScore, toast]);
   
   const handleRestart = useCallback(() => {
     setQuizState('upload');
+    setQuizMode('exam');
     setQuizData(null);
     setCurrentQuestionIndex(0);
     setUserAnswers([]);
@@ -126,17 +134,17 @@ export default function HomePage() {
   }, []);
 
   const currentQuestionData = useMemo(() => {
-    if (quizData && quizState === 'active') {
+    if (quizData && quizState === 'active' && quizMode === 'exam') {
       return quizData.questions[currentQuestionIndex];
     }
     return null;
-  }, [quizData, quizState, currentQuestionIndex]);
+  }, [quizData, quizState, quizMode, currentQuestionIndex]);
 
   if (isLoading) {
     return (
       <main className="flex-grow flex flex-col items-center justify-center p-4 md:p-8 bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="mt-4 text-lg text-foreground">Loading Quiz...</p>
+        <p className="mt-4 text-lg text-foreground">Loading...</p>
       </main>
     );
   }
@@ -147,14 +155,20 @@ export default function HomePage() {
         {quizState === 'upload' && (
           <QuizUpload onQuizStart={handleQuizStart} suggestedFormat={SUGGESTED_JSON_FORMAT} />
         )}
-        {quizState === 'active' && currentQuestionData && quizData && (
+        {quizState === 'active' && quizMode === 'exam' && currentQuestionData && quizData && (
           <QuestionDisplay
-            key={currentQuestionData.id} // Ensure re-mount for timer reset
+            key={currentQuestionData.id} 
             question={currentQuestionData}
             questionNumber={currentQuestionIndex + 1}
             totalQuestions={quizData.questions.length}
             timeLimit={timePerQuestion}
             onNext={handleNextQuestion}
+          />
+        )}
+        {quizState === 'active' && quizMode === 'study' && quizData && (
+          <StudyModeDisplay 
+            quizData={quizData} 
+            onExitStudyMode={handleRestart} 
           />
         )}
         {quizState === 'results' && quizResult && (

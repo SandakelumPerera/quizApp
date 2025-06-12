@@ -1,3 +1,4 @@
+
 import type React from 'react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -5,12 +6,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { UploadCloud, Info } from 'lucide-react';
+import { UploadCloud, Info, BookOpen, Edit3 } from 'lucide-react';
 import type { QuizData } from '@/types/quiz';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Switch } from "@/components/ui/switch";
+
+type QuizMode = 'exam' | 'study';
 
 interface QuizUploadProps {
-  onQuizStart: (quizData: QuizData, timePerQuestion: number) => void;
+  onQuizStart: (quizData: QuizData, timePerQuestion: number, mode: QuizMode) => void;
   suggestedFormat: string;
 }
 
@@ -20,6 +24,7 @@ export function QuizUpload({ onQuizStart, suggestedFormat }: QuizUploadProps) {
   const [file, setFile] = useState<File | null>(null);
   const [timePerQuestion, setTimePerQuestion] = useState<number>(timerOptions[0]);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<QuizMode>('exam');
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
@@ -42,7 +47,6 @@ export function QuizUpload({ onQuizStart, suggestedFormat }: QuizUploadProps) {
           throw new Error('Failed to read file content.');
         }
         const jsonData = JSON.parse(text) as QuizData;
-        // Basic validation
         if (!jsonData.questions || !Array.isArray(jsonData.questions) || jsonData.questions.length === 0) {
           throw new Error('Invalid quiz format: "questions" array is missing, not an array, or empty.');
         }
@@ -56,7 +60,7 @@ export function QuizUpload({ onQuizStart, suggestedFormat }: QuizUploadProps) {
             throw new Error(`Invalid format for question at index ${index}.`);
           }
         });
-        onQuizStart(jsonData, timePerQuestion);
+        onQuizStart(jsonData, timePerQuestion, mode);
       } catch (err) {
         console.error("Error parsing JSON or validating quiz data:", err);
         setError(err instanceof Error ? err.message : 'Invalid JSON file or format.');
@@ -73,7 +77,7 @@ export function QuizUpload({ onQuizStart, suggestedFormat }: QuizUploadProps) {
       <CardHeader>
         <CardTitle className="text-3xl text-center font-headline">QuizJSON</CardTitle>
         <CardDescription className="text-center">
-          Upload your quiz in JSON format to begin.
+          Upload your quiz in JSON format and choose your mode.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -98,26 +102,52 @@ export function QuizUpload({ onQuizStart, suggestedFormat }: QuizUploadProps) {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="time-limit">Time per Question</Label>
-          <Select value={String(timePerQuestion)} onValueChange={(value) => setTimePerQuestion(Number(value))}>
-            <SelectTrigger id="time-limit">
-              <SelectValue placeholder="Select time limit" />
-            </SelectTrigger>
-            <SelectContent>
-              {timerOptions.map((time) => (
-                <SelectItem key={time} value={String(time)}>
-                  {Math.floor(time / 60)}:{String(time % 60).padStart(2, '0')} minutes
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="space-y-3">
+          <Label>Mode Selection</Label>
+          <div className="flex items-center justify-between p-3 border rounded-md">
+            <div className='flex items-center'>
+              <Edit3 className={`mr-2 h-5 w-5 ${mode === 'exam' ? 'text-primary' : 'text-muted-foreground'}`} />
+              <Label htmlFor="mode-switch" className={`${mode === 'exam' ? 'text-primary font-semibold' : 'text-muted-foreground'}`}>
+                Exam Mode
+              </Label>
+            </div>
+            <Switch
+              id="mode-switch"
+              checked={mode === 'study'}
+              onCheckedChange={(checked) => setMode(checked ? 'study' : 'exam')}
+              aria-label="Toggle between Exam and Study mode"
+            />
+            <div className='flex items-center'>
+              <Label htmlFor="mode-switch" className={`mr-2 ${mode === 'study' ? 'text-accent font-semibold' : 'text-muted-foreground'}`}>
+                Study Mode
+              </Label>
+              <BookOpen className={`h-5 w-5 ${mode === 'study' ? 'text-accent' : 'text-muted-foreground'}`} />
+            </div>
+          </div>
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {mode === 'exam' && (
+          <div className="space-y-2 animate-fade-in">
+            <Label htmlFor="time-limit">Time per Question (Exam Mode)</Label>
+            <Select value={String(timePerQuestion)} onValueChange={(value) => setTimePerQuestion(Number(value))}>
+              <SelectTrigger id="time-limit">
+                <SelectValue placeholder="Select time limit" />
+              </SelectTrigger>
+              <SelectContent>
+                {timerOptions.map((time) => (
+                  <SelectItem key={time} value={String(time)}>
+                    {Math.floor(time / 60)}:{String(time % 60).padStart(2, '0')} minutes
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {error && <p className="text-sm text-destructive text-center">{error}</p>}
 
         <Button onClick={handleSubmit} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" size="lg">
-          Start Quiz
+          {mode === 'exam' ? 'Start Exam' : 'Start Studying'}
         </Button>
       </CardContent>
     </Card>
