@@ -19,20 +19,21 @@ type QuizMode = 'exam' | 'study';
 type UploadMode = 'file' | 'generate';
 
 interface QuizUploadProps {
-  onQuizLoad: (quizData: QuizData, timePerQuestion: number, mode: QuizMode) => void;
+  onQuizLoad: (quizData: QuizData, mode: QuizMode, timePerQuestion?: number) => void;
   onGenerateQuiz: (generationInput: GenerateQuizInput, mode: QuizMode) => Promise<void>;
   suggestedFormat: string;
 }
 
 const timerOptions = Array.from({ length: 12 }, (_, i) => 60 + i * 5); // 1:00 to 1:55 in 5s intervals
 timerOptions.unshift(30); // Add 30 seconds option
+timerOptions.unshift(0); // Add 'No time limit' option
 timerOptions.sort((a, b) => a - b);
 
-const numQuestionsOptions = Array.from({ length: 10 }, (_, i) => (i + 1) * 1).concat([15, 20]); // 1-10, 15, 20
+const numQuestionsOptions = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
 
 export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: QuizUploadProps) {
   const [file, setFile] = useState<File | null>(null);
-  const [timePerQuestion, setTimePerQuestion] = useState<number>(timerOptions[2]); // Default to 60s
+  const [timePerQuestionFile, setTimePerQuestionFile] = useState<number>(timerOptions[2]); // Default to 60s for file upload
   const [error, setError] = useState<string | null>(null);
   const [quizMode, setQuizMode] = useState<QuizMode>('exam');
   const [uploadMode, setUploadMode] = useState<UploadMode>('file');
@@ -52,10 +53,10 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
   const handleImageFilesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
       const filesArray = Array.from(event.target.files);
-      if (filesArray.length > 5) { // Limit to 5 images for now
+      if (filesArray.length > 5) { 
         toast({variant: 'destructive', title: 'Too many images', description: 'Please select up to 5 images.'});
         setMaterialImages(filesArray.slice(0,5));
-        event.target.value = ''; // Clear the input
+        event.target.value = ''; 
       } else {
         setMaterialImages(filesArray);
       }
@@ -86,7 +87,7 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
         jsonData.questions.forEach((q, index) => {
           if (!q.id || typeof q.id !== 'string' ||
               !q.questionText || typeof q.questionText !== 'string' ||
-              !q.options || !Array.isArray(q.options) || q.options.length < 2 || q.options.some(opt => typeof opt !== 'string') ||
+              !q.options || !Array.isArray(q.options) || q.options.length < 2 || q.options.some(opt => typeof opt !== 'string') || // Min 2 for manual, AI will do min 5
               !q.correctAnswers || !Array.isArray(q.correctAnswers) || q.correctAnswers.length === 0 || q.correctAnswers.some(ans => typeof ans !== 'number' || ans < 0 || ans >= q.options.length) ||
               typeof q.isMultipleChoice !== 'boolean'
           ) {
@@ -96,7 +97,7 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
             throw new Error(`Question at index ${index} is single choice but has multiple correct answers.`);
           }
         });
-        onQuizLoad(jsonData, timePerQuestion, quizMode);
+        onQuizLoad(jsonData, quizMode, quizMode === 'exam' ? timePerQuestionFile : undefined);
       } catch (err) {
         console.error("Error parsing JSON or validating quiz data:", err);
         setError(err instanceof Error ? err.message : 'Invalid JSON file or format.');
@@ -141,14 +142,16 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
         materialImages: imageDataUris.length > 0 ? imageDataUris : undefined,
         numberOfQuestions: numGeneratedQuestions,
       };
-      await onGenerateQuiz(generationInput, quizMode);
+      // For generated quizzes in exam mode, we will use a time limit per question of 0 (no timer).
+      // This can be revisited if a specific timer for AI generated quizzes is desired.
+      await onGenerateQuiz(generationInput, quizMode); 
     } catch (readError) {
        console.error("Error reading images:", readError);
        setError(readError instanceof Error ? readError.message : "Error processing images.");
     }
   };
   
-  const selectedTimerOption = timerOptions.find(t => t === timePerQuestion) || timerOptions[0];
+  const selectedTimerOptionFile = timerOptions.find(t => t === timePerQuestionFile) ?? timerOptions[2];
 
 
   return (
@@ -195,14 +198,14 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
             </div>
              <div className="space-y-2">
                 <Label htmlFor="time-limit-file">Time per Question (Exam Mode)</Label>
-                <Select value={String(selectedTimerOption)} onValueChange={(value) => setTimePerQuestion(Number(value))} disabled={quizMode === 'study'}>
+                <Select value={String(selectedTimerOptionFile)} onValueChange={(value) => setTimePerQuestionFile(Number(value))} disabled={quizMode === 'study'}>
                   <SelectTrigger id="time-limit-file" disabled={quizMode === 'study'}>
                     <SelectValue placeholder="Select time limit" />
                   </SelectTrigger>
                   <SelectContent>
                     {timerOptions.map((time) => (
                       <SelectItem key={time} value={String(time)}>
-                        {time === 0 ? 'No time limit' : `${Math.floor(time / 60)}:${String(time % 60).padStart(2, '0')} minutes`}
+                        {time === 0 ? 'No timer per question' : `${Math.floor(time / 60)}:${String(time % 60).padStart(2, '0')} minutes`}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -217,7 +220,7 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
               <Label htmlFor="material-text">Study Text (Optional)</Label>
                <Textarea 
                 id="material-text" 
-                placeholder="Paste your study text here. For PDFs, please copy and paste the content."
+                placeholder="Paste your study text here. For PDFs, please copy and paste the content. More text helps generate better questions."
                 value={materialText}
                 onChange={(e) => setMaterialText(e.target.value)}
                 rows={6}
@@ -242,7 +245,7 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
                 )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="num-questions">Number of Questions to Generate</Label>
+              <Label htmlFor="num-questions">Number of Questions to Generate (max 50)</Label>
                <Select value={String(numGeneratedQuestions)} onValueChange={(value) => setNumGeneratedQuestions(Number(value))}>
                 <SelectTrigger id="num-questions">
                   <SelectValue placeholder="Select number of questions" />
@@ -256,6 +259,9 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
                 </SelectContent>
               </Select>
             </div>
+             <p className="text-xs text-muted-foreground">
+                Note: For generated quizzes in Exam Mode, there is no timer per question by default.
+             </p>
           </div>
         )}
 
@@ -288,11 +294,11 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
       </CardContent>
       <CardFooter>
         {uploadMode === 'file' ? (
-            <Button onClick={handleSubmitFile} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" size="lg">
+            <Button onClick={handleSubmitFile} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" size="lg" disabled={!file}>
             {quizMode === 'exam' ? 'Start Exam from File' : 'Start Studying from File'}
             </Button>
         ) : (
-            <Button onClick={handleGenerateAndStart} className="w-full bg-accent hover:bg-accent/90 text-accent-foreground" size="lg">
+            <Button onClick={handleGenerateAndStart} className="w-full bg-accent hover:bg-accent/90 text-accent-foreground" size="lg" disabled={!materialText && materialImages.length === 0}>
                 <ListPlus className="mr-2 h-5 w-5" />
                 {quizMode === 'exam' ? 'Generate & Start Exam' : 'Generate & Study'}
             </Button>
@@ -301,3 +307,5 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
     </Card>
   );
 }
+
+    

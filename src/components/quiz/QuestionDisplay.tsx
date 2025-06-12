@@ -1,6 +1,6 @@
 
 import type React from 'react';
-import { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Question } from '@/types/quiz';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -14,7 +14,7 @@ interface QuestionDisplayProps {
   question: Question;
   questionNumber: number;
   totalQuestions: number;
-  timeLimit: number; // in seconds
+  timeLimit: number; // in seconds, 0 means no timer
   onNext: (selectedAnswers: number[], timeTaken: number) => void;
 }
 
@@ -29,22 +29,28 @@ export function QuestionDisplay({
   const [timeLeft, setTimeLeft] = useState<number>(timeLimit);
   
   const startTimeRef = useRef<number>(0);
-  const selectedAnswersRef = useRef<number[]>(selectedAnswers);
+  // Use a ref for selectedAnswers to ensure the timer callback has the latest value
+  const selectedAnswersRef = useRef<number[]>(selectedAnswers); 
 
   useEffect(() => {
     selectedAnswersRef.current = selectedAnswers;
   }, [selectedAnswers]);
 
+
   useEffect(() => {
-    setTimeLeft(timeLimit);
+    // Reset for new question
+    setTimeLeft(timeLimit); 
     setSelectedAnswers([]); 
-    selectedAnswersRef.current = []; 
+    selectedAnswersRef.current = []; // Also reset the ref
     startTimeRef.current = Date.now(); 
+
+    if (timeLimit === 0) return; // No timer if timeLimit is 0
 
     const timer = setInterval(() => {
       setTimeLeft((prevTime) => {
         if (prevTime <= 1) {
           clearInterval(timer);
+          // Use selectedAnswersRef.current here
           const timeTaken = Math.round((Date.now() - startTimeRef.current) / 1000);
           onNext(selectedAnswersRef.current, Math.min(timeTaken, timeLimit)); 
           return 0;
@@ -54,7 +60,9 @@ export function QuestionDisplay({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [question, timeLimit, onNext]);
+  // Ensure onNext is stable or wrapped in useCallback in parent if it changes frequently
+  // For now, question should be the main dependency to reset the timer.
+  }, [question, timeLimit, onNext]); 
 
 
   const handleSingleSelect = (value: string) => {
@@ -68,12 +76,12 @@ export function QuestionDisplay({
   };
 
   const handleSubmit = useCallback(() => {
-    const timeTaken = Math.round((Date.now() - startTimeRef.current) / 1000);
-    onNext(selectedAnswers, Math.min(timeTaken, timeLimit));
+    const timeTaken = timeLimit === 0 ? 0 : Math.round((Date.now() - startTimeRef.current) / 1000);
+    onNext(selectedAnswers, timeLimit === 0 ? 0 : Math.min(timeTaken, timeLimit));
   }, [onNext, selectedAnswers, timeLimit]);
 
 
-  const progressPercentage = (timeLeft / timeLimit) * 100;
+  const progressPercentage = timeLimit > 0 ? (timeLeft / timeLimit) * 100 : 100;
 
   return (
     <Card className="w-full max-w-2xl mx-auto shadow-xl animate-fade-in">
@@ -82,12 +90,14 @@ export function QuestionDisplay({
             <CardDescription>
             Question {questionNumber} of {totalQuestions}
             </CardDescription>
-            <div className="flex items-center text-lg font-medium text-primary">
-                <TimerIcon className="mr-2 h-5 w-5" />
-                <span>{Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}</span>
-            </div>
+            {timeLimit > 0 && (
+              <div className="flex items-center text-lg font-medium text-primary">
+                  <TimerIcon className="mr-2 h-5 w-5" />
+                  <span>{Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}</span>
+              </div>
+            )}
         </div>
-        <Progress value={progressPercentage} className="w-full h-2 [&>div]:bg-accent" />
+        {timeLimit > 0 && <Progress value={progressPercentage} className="w-full h-2 [&>div]:bg-accent" />}
         <CardTitle className="text-2xl mt-4 font-headline">{question.questionText}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -132,3 +142,5 @@ export function QuestionDisplay({
     </Card>
   );
 }
+
+    

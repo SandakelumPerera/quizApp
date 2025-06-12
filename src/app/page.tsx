@@ -7,8 +7,9 @@ import { QuizUpload } from '@/components/quiz/QuizUpload';
 import { QuestionDisplay } from '@/components/quiz/QuestionDisplay';
 import { QuizResults } from '@/components/quiz/QuizResults';
 import { StudyModeDisplay } from '@/components/quiz/StudyModeDisplay';
+import { Button } from '@/components/ui/button';
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, BrainCircuit } from 'lucide-react'; // Added BrainCircuit
+import { Loader2, BrainCircuit, Download } from 'lucide-react';
 import { generateQuiz, type GenerateQuizInput } from '@/ai/flows/generate-quiz-flow';
 
 const SUGGESTED_JSON_FORMAT = `{
@@ -30,6 +31,7 @@ const SUGGESTED_JSON_FORMAT = `{
       "isMultipleChoice": true,
       "explanation": "Red, Green, and Blue are primary additive colors."
     }
+    // For AI generation, ensure at least 5 options.
   ]
 }`;
 
@@ -45,17 +47,19 @@ export default function HomePage() {
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
   const { toast } = useToast();
 
-  const handleQuizLoad = useCallback((data: QuizData, mode: QuizMode, timeLimitPerQuestion?: number) => {
-    setQuizData(data);
+  const handleQuizLoad = useCallback((loadedQuizData: QuizData, mode: QuizMode, timeLimitPerQuestion?: number) => {
+    setQuizData(loadedQuizData);
     setQuizMode(mode);
     if (mode === 'exam') {
-      setTimePerQuestion(timeLimitPerQuestion || 0); // 0 for generated quizzes means no timer per q, or use configured time
+      // For file uploads, use the passed timeLimitPerQuestion (which comes from QuizUpload's select)
+      // For AI generated quizzes, timeLimitPerQuestion will be undefined, so QuestionDisplay defaults to 0 (no timer)
+      setTimePerQuestion(typeof timeLimitPerQuestion === 'number' ? timeLimitPerQuestion : 0);
       setCurrentQuestionIndex(0);
       setUserAnswers([]);
     }
     setQuizResult(null);
     setQuizState('active');
-    toast({ title: mode === 'exam' ? "Quiz Ready!" : "Study Mode Activated!", description: data.title || (mode === 'exam' ? "Good luck!" : "Happy studying!") });
+    toast({ title: mode === 'exam' ? "Quiz Ready!" : "Study Mode Activated!", description: loadedQuizData.title || (mode === 'exam' ? "Good luck!" : "Happy studying!") });
   }, [toast]);
 
 
@@ -64,14 +68,13 @@ export default function HomePage() {
     try {
       const generatedData = await generateQuiz(generationInput);
       if (!generatedData || !generatedData.questions || generatedData.questions.length === 0) {
-        toast({ variant: "destructive", title: "Generation Failed", description: "The AI could not generate a quiz from the provided material." });
+        toast({ variant: "destructive", title: "Generation Failed", description: "The AI could not generate a quiz from the provided material. Please try refining your input or try again." });
         setQuizState('upload');
         return;
       }
-      // For generated quizzes, we might not want a strict time limit per question initially, or make it configurable.
-      // Setting to 0 implies no individual question timer for now in QuestionDisplay logic (if adapted) or rely on total time.
-      // Or, we can assign a default time like 60s.
-      handleQuizLoad(generatedData, mode, mode === 'exam' ? 60 : undefined); 
+      // For AI generated quizzes, we pass undefined for timeLimitPerQuestion to handleQuizLoad.
+      // handleQuizLoad will then set timePerQuestion to 0 for exam mode.
+      handleQuizLoad(generatedData, mode, undefined); 
     } catch (error) {
       console.error("Quiz generation error:", error);
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred during quiz generation.";
@@ -145,12 +148,36 @@ export default function HomePage() {
   
   const handleRestart = useCallback(() => {
     setQuizState('upload');
-    setQuizMode('exam');
+    setQuizMode('exam'); // Default to exam mode on restart
     setQuizData(null);
     setCurrentQuestionIndex(0);
     setUserAnswers([]);
     setQuizResult(null);
   }, []);
+
+  const handleExportQuiz = useCallback(() => {
+    if (!quizData) {
+      toast({ variant: "destructive", title: "No Quiz Data", description: "Cannot export an empty quiz." });
+      return;
+    }
+    try {
+      const jsonString = JSON.stringify(quizData, null, 2);
+      const blob = new Blob([jsonString], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      const fileName = `${quizData.title.replace(/\s+/g, '_') || 'quiz'}_export.json`;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast({ title: "Quiz Exported!", description: `${fileName} downloaded successfully.` });
+    } catch (error) {
+      console.error("Error exporting quiz:", error);
+      toast({ variant: "destructive", title: "Export Failed", description: "Could not export the quiz." });
+    }
+  }, [quizData, toast]);
 
   const currentQuestionData = useMemo(() => {
     if (quizData && quizState === 'active' && quizMode === 'exam') {
@@ -164,7 +191,7 @@ export default function HomePage() {
       <main className="flex-grow flex flex-col items-center justify-center p-4 md:p-8 bg-background">
         <BrainCircuit className="h-16 w-16 animate-pulse text-primary mb-4" />
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="mt-4 text-xl text-foreground">Generating your quiz...</p>
+        <p className="mt-4 text-xl text-foreground">Generating your challenging quiz...</p>
         <p className="text-sm text-muted-foreground">This may take a moment.</p>
       </main>
     );
@@ -172,6 +199,14 @@ export default function HomePage() {
   
   return (
     <main className="flex-grow flex flex-col items-center justify-center p-4 md:p-8 bg-background">
+       {quizData && (quizState === 'active' || quizState === 'results') && (
+        <div className="fixed top-4 right-4 z-50">
+          <Button onClick={handleExportQuiz} variant="outline" size="sm">
+            <Download className="mr-2 h-4 w-4" />
+            Export Quiz
+          </Button>
+        </div>
+      )}
       <div className="container mx-auto">
         {quizState === 'upload' && (
           <QuizUpload 
@@ -186,7 +221,7 @@ export default function HomePage() {
             question={currentQuestionData}
             questionNumber={currentQuestionIndex + 1}
             totalQuestions={quizData.questions.length}
-            timeLimit={timePerQuestion} // This will be 0 for generated quizzes if not set otherwise
+            timeLimit={timePerQuestion} 
             onNext={handleNextQuestion}
           />
         )}
@@ -203,3 +238,5 @@ export default function HomePage() {
     </main>
   );
 }
+
+    
