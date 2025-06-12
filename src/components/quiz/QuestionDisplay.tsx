@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Question } from '@/types/quiz';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+// RadioGroup and RadioGroupItem are no longer needed
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -29,7 +29,6 @@ export function QuestionDisplay({
   const [timeLeft, setTimeLeft] = useState<number>(timeLimit);
   
   const startTimeRef = useRef<number>(0);
-  // Use a ref for selectedAnswers to ensure the timer callback has the latest value
   const selectedAnswersRef = useRef<number[]>(selectedAnswers); 
 
   useEffect(() => {
@@ -38,19 +37,17 @@ export function QuestionDisplay({
 
 
   useEffect(() => {
-    // Reset for new question
     setTimeLeft(timeLimit); 
     setSelectedAnswers([]); 
-    selectedAnswersRef.current = []; // Also reset the ref
+    selectedAnswersRef.current = []; 
     startTimeRef.current = Date.now(); 
 
-    if (timeLimit === 0) return; // No timer if timeLimit is 0
+    if (timeLimit === 0) return; 
 
     const timer = setInterval(() => {
       setTimeLeft((prevTime) => {
         if (prevTime <= 1) {
           clearInterval(timer);
-          // Use selectedAnswersRef.current here
           const timeTaken = Math.round((Date.now() - startTimeRef.current) / 1000);
           onNext(selectedAnswersRef.current, Math.min(timeTaken, timeLimit)); 
           return 0;
@@ -60,19 +57,29 @@ export function QuestionDisplay({
     }, 1000);
 
     return () => clearInterval(timer);
-  // Ensure onNext is stable or wrapped in useCallback in parent if it changes frequently
-  // For now, question should be the main dependency to reset the timer.
   }, [question, timeLimit, onNext]); 
 
 
-  const handleSingleSelect = (value: string) => {
-    setSelectedAnswers([parseInt(value, 10)]);
-  };
-
-  const handleMultiSelect = (index: number) => {
-    setSelectedAnswers((prev) =>
-      prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index]
-    );
+  const handleOptionSelect = (selectedIndex: number) => {
+    if (question.isMultipleChoice) {
+      setSelectedAnswers((prevSelected) => {
+        const newSelected = prevSelected.includes(selectedIndex)
+          ? prevSelected.filter((i) => i !== selectedIndex) // Toggle off
+          : [...prevSelected, selectedIndex]; // Toggle on
+        return newSelected;
+      });
+    } else {
+      // Single choice logic with checkboxes:
+      // If it's already selected, clicking again deselects it.
+      // If a different one is selected, it becomes the only selected one.
+      setSelectedAnswers((prevSelected) => {
+        if (prevSelected.includes(selectedIndex)) {
+          return []; // Allow unchecking
+        } else {
+          return [selectedIndex]; // Select only this one
+        }
+      });
+    }
   };
 
   const handleSubmit = useCallback(() => {
@@ -101,38 +108,21 @@ export function QuestionDisplay({
         <CardTitle className="text-2xl mt-4 font-headline">{question.questionText}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {question.isMultipleChoice ? (
-          <div className="space-y-3">
-            {question.options.map((option, index) => (
-              <div key={index} className="flex items-center space-x-3 p-3 border rounded-md hover:bg-muted/50 transition-colors">
-                <Checkbox
-                  id={`option-${index}`}
-                  checked={selectedAnswers.includes(index)}
-                  onCheckedChange={() => handleMultiSelect(index)}
-                  aria-label={option}
-                />
-                <Label htmlFor={`option-${index}`} className="text-base cursor-pointer flex-1">
-                  {option}
-                </Label>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <RadioGroup
-            onValueChange={handleSingleSelect}
-            value={selectedAnswers.length > 0 ? String(selectedAnswers[0]) : ''}
-            className="space-y-3"
-          >
-            {question.options.map((option, index) => (
-              <div key={index} className="flex items-center space-x-3 p-3 border rounded-md hover:bg-muted/50 transition-colors">
-                <RadioGroupItem value={String(index)} id={`option-${index}`} aria-label={option}/>
-                <Label htmlFor={`option-${index}`} className="text-base cursor-pointer flex-1">
-                  {option}
-                </Label>
-              </div>
-            ))}
-          </RadioGroup>
-        )}
+        <div className="space-y-3">
+          {question.options.map((option, index) => (
+            <div key={index} className="flex items-center space-x-3 p-3 border rounded-md hover:bg-muted/50 transition-colors">
+              <Checkbox
+                id={`option-${index}`}
+                checked={selectedAnswers.includes(index)}
+                onCheckedChange={() => handleOptionSelect(index)}
+                aria-label={option}
+              />
+              <Label htmlFor={`option-${index}`} className="text-base cursor-pointer flex-1">
+                {option}
+              </Label>
+            </div>
+          ))}
+        </div>
       </CardContent>
       <CardFooter>
         <Button onClick={handleSubmit} className="w-full bg-accent hover:bg-accent/90 text-accent-foreground" size="lg">
@@ -142,5 +132,3 @@ export function QuestionDisplay({
     </Card>
   );
 }
-
-    
