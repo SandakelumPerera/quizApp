@@ -1,18 +1,18 @@
 
 import type React from 'react';
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UploadCloud, Info, BookOpen, Edit3, Sparkles, FileText, Image as ImageIcon, ListPlus } from 'lucide-react';
 import type { QuizData } from '@/types/quiz';
 import type { GenerateQuizInput } from '@/ai/flows/generate-quiz-flow';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 
 type QuizMode = 'exam' | 'study';
@@ -33,7 +33,7 @@ const numQuestionsOptions = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
 
 export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: QuizUploadProps) {
   const [file, setFile] = useState<File | null>(null);
-  const [timePerQuestionFile, setTimePerQuestionFile] = useState<number>(timerOptions[2]); // Default to 60s for file upload
+  const [timePerQuestionFile, setTimePerQuestionFile] = useState<number>(timerOptions[2]);
   const [error, setError] = useState<string | null>(null);
   const [quizMode, setQuizMode] = useState<QuizMode>('exam');
   const [uploadMode, setUploadMode] = useState<UploadMode>('file');
@@ -87,7 +87,7 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
         jsonData.questions.forEach((q, index) => {
           if (!q.id || typeof q.id !== 'string' ||
               !q.questionText || typeof q.questionText !== 'string' ||
-              !q.options || !Array.isArray(q.options) || q.options.length < 2 || q.options.some(opt => typeof opt !== 'string') || // Min 2 for manual, AI will do min 5
+              !q.options || !Array.isArray(q.options) || q.options.length < 2 || q.options.some(opt => typeof opt !== 'string') ||
               !q.correctAnswers || !Array.isArray(q.correctAnswers) || q.correctAnswers.length === 0 || q.correctAnswers.some(ans => typeof ans !== 'number' || ans < 0 || ans >= q.options.length) ||
               typeof q.isMultipleChoice !== 'boolean'
           ) {
@@ -142,8 +142,6 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
         materialImages: imageDataUris.length > 0 ? imageDataUris : undefined,
         numberOfQuestions: numGeneratedQuestions,
       };
-      // For generated quizzes in exam mode, we will use a time limit per question of 0 (no timer).
-      // This can be revisited if a specific timer for AI generated quizzes is desired.
       await onGenerateQuiz(generationInput, quizMode); 
     } catch (readError) {
        console.error("Error reading images:", readError);
@@ -153,29 +151,25 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
   
   const selectedTimerOptionFile = timerOptions.find(t => t === timePerQuestionFile) ?? timerOptions[2];
 
-
   return (
     <Card className="w-full max-w-lg mx-auto shadow-xl">
       <CardHeader>
-        <CardTitle className="text-3xl text-center font-headline">QuizJSON</CardTitle>
+        <CardTitle className="text-3xl text-center font-headline">QuizMaster AI</CardTitle>
         <CardDescription className="text-center">
-          {uploadMode === 'file' ? 'Upload your quiz in JSON format.' : 'Generate a quiz from study material.'}
+          Choose your method: Upload a JSON quiz or generate one with AI.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-
-        <div className="flex justify-center space-x-2">
-            <Button variant={uploadMode === 'file' ? 'default': 'outline'} onClick={() => setUploadMode('file')} className="flex-1">
-                <UploadCloud className="mr-2 h-4 w-4" /> Upload JSON
-            </Button>
-            <Button variant={uploadMode === 'generate' ? 'default': 'outline'} onClick={() => setUploadMode('generate')} className="flex-1">
-                <Sparkles className="mr-2 h-4 w-4" /> Generate Quiz
-            </Button>
-        </div>
-        <Separator />
-
-        {uploadMode === 'file' && (
-          <div className="space-y-4 animate-fade-in">
+        <Tabs value={uploadMode} onValueChange={(value) => setUploadMode(value as UploadMode)} className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="file">
+              <UploadCloud className="mr-2 h-4 w-4" /> Upload JSON
+            </TabsTrigger>
+            <TabsTrigger value="generate">
+              <Sparkles className="mr-2 h-4 w-4" /> Generate with AI
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="file" className="pt-4 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="quiz-file" className="flex items-center">
                 Quiz JSON File
@@ -205,17 +199,14 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
                   <SelectContent>
                     {timerOptions.map((time) => (
                       <SelectItem key={time} value={String(time)}>
-                        {time === 0 ? 'No timer per question' : `${Math.floor(time / 60)}:${String(time % 60).padStart(2, '0')} minutes`}
+                        {time === 0 ? 'No timer per question' : `${Math.floor(time / 60)}:${String(time % 60).padStart(2, '0')} min`}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-          </div>
-        )}
-
-        {uploadMode === 'generate' && (
-          <div className="space-y-4 animate-fade-in">
+          </TabsContent>
+          <TabsContent value="generate" className="pt-4 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="material-text">Study Text (Optional)</Label>
                <Textarea 
@@ -260,10 +251,10 @@ export function QuizUpload({ onQuizLoad, onGenerateQuiz, suggestedFormat }: Quiz
               </Select>
             </div>
              <p className="text-xs text-muted-foreground">
-                Note: For generated quizzes in Exam Mode, there is no timer per question by default.
+                Note: For AI generated quizzes in Exam Mode, there is no timer per question by default.
              </p>
-          </div>
-        )}
+          </TabsContent>
+        </Tabs>
 
         <div className="space-y-3">
           <Label>Mode Selection</Label>

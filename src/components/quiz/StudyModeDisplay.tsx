@@ -1,6 +1,6 @@
 
 import type React from 'react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { QuizData } from '@/types/quiz';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,6 +25,21 @@ export function StudyModeDisplay({ quizData, onExitStudyMode }: StudyModeDisplay
   const goToNextCard = useCallback(() => {
     setCurrentCardIndex((prev) => Math.min(totalCards - 1, prev + 1));
   }, [totalCards]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') {
+        goToPreviousCard();
+      } else if (event.key === 'ArrowRight') {
+        goToNextCard();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [goToPreviousCard, goToNextCard]);
 
   return (
     <div className="w-full max-w-2xl mx-auto flex flex-col items-center space-y-6 animate-fade-in">
@@ -70,3 +85,5 @@ export function StudyModeDisplay({ quizData, onExitStudyMode }: StudyModeDisplay
     </div>
   );
 }
+
+    
